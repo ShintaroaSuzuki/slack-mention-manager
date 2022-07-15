@@ -1,0 +1,7 @@
+services:
+  slack-mention-manager:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - 4000:8080
