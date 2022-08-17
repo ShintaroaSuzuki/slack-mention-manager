@@ -5,8 +5,10 @@ dotenv.config();
 const client = new WebClient(process.env.SLACK_USER_TOKEN);
 
 export const getNoReactionMentionedHistories = async () => {
-  const conversations = await client.conversations.list();
-  const channels = conversations.channels;
+  const conversations = await client.conversations.list({
+    limit: 10000
+  });
+  const channels = conversations.channels.filter((c) => c.is_archived == false && c.is_member == true);
   const messages = [];
   if (!channels) return;
   await Promise.all(
@@ -23,8 +25,7 @@ export const getNoReactionMentionedHistories = async () => {
             (message) =>
               message.type === "message" &&
               message.subtype === undefined &&
-              message.text.includes(`<@${process.env.SLACK_USER_ID}>`) &&
-              !checkReactions(message)
+              message.text.includes(`<@${process.env.SLACK_USER_ID}>`)
           ),
         });
       })()
@@ -38,36 +39,52 @@ export const formatMessageLinks = async (messageHistories) => {
   await Promise.all(
     messageHistories.map((messageHistory) =>
       (async () => {
-        await Promise.all(
-          messageHistory.messages.map((message) =>
-            (async () => {
-              const result = await client.chat.getPermalink({
-                channel: messageHistory.channelId,
-                message_ts: message.ts,
-              });
-              messageLinks.push(result.permalink);
-            })()
-          )
-        );
+        const result = await client.chat.getPermalink({
+          channel: messageHistory.channelId,
+          message_ts: messageHistory.message.ts,
+        });
+        messageLinks.push(result.permalink);
       })()
     )
   );
   return messageLinks.join("\n");
 };
 
-const checkReactions = (message) => {
-  if (!message.reactions) return false;
+export const getNoReactedMessages = async (messageHistories, extractedMessages) => {
+  await Promise.all(
+    messageHistories.map((history) => (async () => {
+      await extractNoReactMessage(history.messages, history.channelId, extractedMessages)
+    })()
+  ))
+}
+
+const extractNoReactMessage = async (messages, channelId, extractedMessages) => {
+  await Promise.all(
+    messages.map((message) => (async () => {
+      let reactionExisted = await checkReactions(message)
+      if (!reactionExisted) {
+        extractedMessages.push({
+          channelId,
+          message
+        })
+      }
+    })()
+  ))
+} 
+
+const checkReactions = async (message) => {
+  if (!message.reactions) {return false};
   if (
-    !message.reactions.filter(
-      (reaction) => reaction.name === process.env.REACTION_NAME
-    )[0]
+    message.reactions.filter(
+      (reaction) => reaction.name == process.env.REACTION_NAME
+    ).length == 0
   )
-    return false;
+    {return false};
   if (
     !message.reactions
-      .filter((reaction) => reaction.name === process.env.REACTION_NAME)[0]
+      .filter((reaction) => reaction.name == process.env.REACTION_NAME)[0]
       .users.includes(process.env.SLACK_USER_ID)
   )
-    return false;
+    {return false};
   return true;
 };
